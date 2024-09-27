@@ -1,0 +1,6 @@
+# .gitignore
+terraform/.terraform/
+*.zip
+*.tar.gz
+secrets.txt
+variables.tf
