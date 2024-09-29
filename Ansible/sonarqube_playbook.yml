@@ -21,13 +21,23 @@
         delay: 15
         timeout: 60
 
+    - name: "Wait until SonarQube Container is reachable via TCP/IP."
+      ansible.builtin.wait_for:
+        host: "localhost"
+        port: "{{ sonarqube_port }}"
+        state: drained
+        delay: 5
+        connect_timeout: 15
+        timeout: 30
+
+
     - name: Create a new SonarQube project
       uri:
         url: "http://<SONARQUBE_URL>/api/projects/create"
         method: POST
         body: "key=your-project-key&name=Your Project Name"
         user: "admin"  # Use admin credentials
-        password: "your-admin-password"
+        password: "admin"
         headers:
           Content-Type: "application/x-www-form-urlencoded"
       register: sonar_project_creation

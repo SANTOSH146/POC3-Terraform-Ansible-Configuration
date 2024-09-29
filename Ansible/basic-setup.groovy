@@ -16,7 +16,7 @@ def strategy = new FullControlOnceLoggedInAuthorizationStrategy()
 instance.setAuthorizationStrategy(strategy)
 
 // Install plugins
-def plugins = ['git', 'sonar', 'pipeline']
+def plugins = ['git', 'sonar', 'pipeline','sonar quality gates']
 def pluginManager = instance.getPluginManager()
 def updateCenter = instance.getUpdateCenter()
 

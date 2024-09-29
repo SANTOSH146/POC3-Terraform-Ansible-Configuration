@@ -2,36 +2,79 @@
   <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2.12">
     <script>
       pipeline {
-        agent any
-        stages {
-          stage('Checkout') {
+    agent any
+    
+    stages {
+        stage('Checkout Code') {
             steps {
-              git 'https://github.com/SANTOSH146/Kerala-Tourism-Website-main.git'
+                echo 'Checking out code...'
+                git branch: 'main', url: 'https://github.com/SANTOSH146/Kerala-Tourism-Website-main.git'
             }
-          }
-          stage('Build') {
-            steps {
-              sh 'make build'
-            }
-          }
-          stage('SonarQube Scan') {
-            steps {
-              script {
-                def scannerHome = tool 'SonarScanner'
-                sh "${scannerHome}/bin/sonar-scanner"
-              }
-            }
-          }
-          stage('Deploy') {
-            when {
-              expression { return currentBuild.result == 'SUCCESS' }
-            }
-            steps {
-              sh 'docker-compose up -d'
-            }
-          }
         }
-      }
+        
+        stage('Build') {
+            steps {
+                echo 'Building the application...'
+                sh 'echo "This is a placeholder for the build process."'
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                echo 'Running tests...'
+                sh 'echo "Running sample tests to ensure pipeline is working."'
+            }
+        }
+
+
+        stage('SonarQube Code Analysis') {
+            steps {
+                dir("${WORKSPACE}"){
+                // Run SonarQube analysis for Python
+                script {
+                    def scannerHome = tool name: 'sonarqube_jenkins', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                    withSonarQubeEnv('sonarqube') {
+                        sh "echo $pwd"
+                        sh "${scannerHome}/bin/sonar-scanner"
+                    }
+                }
+            }
+            }
+       }
+       stage("SonarQube Quality Gate Check") {
+            steps {
+                script {
+                def qualityGate = waitForQualityGate()
+                    
+                    if (qualityGate.status != 'OK') {
+                        echo "${qualityGate.status}"
+                        error "Quality Gate failed: ${qualityGateStatus}"
+                    }
+                    else {
+                        echo "${qualityGate.status}"
+                        echo "SonarQube Quality Gates Passed"
+                    }
+                }
+            }
+        }
+
+        stage('Deployment') {
+            steps {
+                echo 'Deploying the application...'
+                sh 'echo "This is a placeholder for the deployment process."'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline executed successfully.'
+        }
+        failure {
+            echo 'Pipeline failed.'
+        }
+    }
+}
     </script>
   </definition>
 </flow-definition>

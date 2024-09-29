@@ -49,6 +49,10 @@
     - name: Create init.groovy.d directory in Jenkins container
       command: docker exec --user root jenkins mkdir -p /var/jenkins_home/init.groovy.d
 
+    - name:copy the groovy file from wsl to vm
+      command: scp -i /home/santosh/terraform_kp.pem /home/santosh/Terraform-POC/Ansible/basic-setup.groovy ubuntu@54.90.15.19:/tmp/
+
+
     - name: Copy basic setup Groovy script to Jenkins container
       command: docker cp /tmp/basic-setup.groovy jenkins:/var/jenkins_home/init.groovy.d/basic-setup.groovy
 
@@ -70,23 +74,25 @@
         delay: 10
         timeout: 60
 
-    - name: Ensure pip is installed
-      apt:
-        name: python3-pip
-        state: present
-      become: true
+    # - name: Ensure pip is installed
+    #   apt:
+    #     name: python3-pip
+    #     state: present
+    #   become: true
 
-    - name: Install python-jenkins library
-      command: /usr/bin/python3 -m pip install python-jenkins
-      become: true
+    # - name: Install python-jenkins library
+    #   command: /usr/bin/python3 -m pip install python-jenkins
+    #   become: true
 
     - name: Create a jenkins job using basic authentication
       community.general.jenkins_job:
         config: "{{ lookup('file', 'pipeline-config.xml') }}"
         name: test
         password: admin
-        url: http://3.84.190.98:8080
+        url: http:54.90.15.19//:8080
         user: admin
+      environment:
+        ANSIBLE_PYTHON_INTERPRETER: ~/root/myenv/bin/python
 
     
 

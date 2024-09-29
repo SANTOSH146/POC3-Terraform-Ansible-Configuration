@@ -1,0 +1,143 @@
+- hosts: Jenkins
+  become: yes
+
+  tasks:
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Pull Jenkins and SonarQube images
+      docker_image:
+        name: "{{ item }}"
+        source: pull
+      loop:
+        - jenkins/jenkins:lts
+        - sonarqube
+
+    - name: Run Jenkins container
+      docker_container:
+        name: jenkins
+        image: jenkins/jenkins:lts
+        state: started
+        published_ports:
+          - "8080:8080"
+          - "50000:50000"
+
+    - name: Run SonarQube container
+      docker_container:
+        name: sonarqube
+        image: sonarqube
+        state: started
+        published_ports:
+          - "9000:9000"
+
+    - name: Wait for Jenkins to start
+      wait_for:
+        port: 8080
+        delay: 10
+        timeout: 60
+
+    - name: Wait for SonarQube to start
+      wait_for:
+        port: 9000
+        delay: 30   # Increased delay for SonarQube to fully start
+        timeout: 180  # Increased timeout
+
+    - name: Get initial Jenkins admin password
+      command: docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+      register: jenkins_password
+      until: jenkins_password.rc == 0
+      retries: 5
+      delay: 10
+
+    - name: Print Jenkins initial admin password
+      debug:
+        msg: "Jenkins initial admin password: {{ jenkins_password.stdout }}"
+
+    - name: Install Groovy in Jenkins container
+      command: docker exec --user root jenkins bash -c "apt-get update && apt-get install -y groovy"
+
+    - name: Create init.groovy.d directory in Jenkins container
+      command: docker exec --user root jenkins mkdir -p /var/jenkins_home/init.groovy.d
+
+    - name: Copy basic setup Groovy script to Jenkins container
+      command: docker cp /tmp/basic-setup.groovy jenkins:/var/jenkins_home/init.groovy.d/basic-setup.groovy
+
+    - name: Restart Jenkins container to apply configuration
+      docker_container:
+        name: jenkins
+        state: stopped
+
+    - name: Start Jenkins container after applying Groovy script
+      docker_container:
+        name: jenkins
+        state: started
+
+    - name: Wait for Jenkins to start
+      wait_for:
+        port: 8080
+        delay: 10
+        timeout: 60
+
+    - name: "Wait until SonarQube Container is reachable via TCP/IP."
+      ansible.builtin.wait_for:
+        host: "54.90.15.19"
+        port: "{{ 9000 }}"
+        state: drained
+        delay: 5
+        connect_timeout: 15
+        timeout: 30
+      
+    - name: Check SonarQube to be healthy.
+      ansible.builtin.uri:
+        url: "http://54.90.15.19:{{ 9000 }}/api/system/health"
+        user: "admin"
+        password: "admin"
+        method: GET
+        force_basic_auth: yes
+      register: response
+      until:
+        - "response.status == 200"
+        - "'GREEN' == response.json.health"
+      retries: 20 # 20 * 5 seconds = 100 seconds.
+      delay: 5 # every 5 seconds
+
+    - name: Create CI User
+      ansible.builtin.uri:
+        url: "http://54.90.15.19:{{ 9000 }}/api/users/create?local=true&login=admin&name={{ admin | urlencode }}&password=12345678"
+        user: "admin"
+        password: "admin"
+        method: POST
+        force_basic_auth: yes
+      register: ciresponse
+      failed_when: ciresponse.status != 200
+
+    - name: Create CI User Token
+      ansible.builtin.uri:
+        url: "http://54.90.15.19:{{ 9000 }}/api/user_tokens/generate?login=admin&name={{ sonarqube_ci_token_purpose | urlencode }}"
+        user: "admin"
+        password: "12345678"
+        method: POST
+        force_basic_auth: yes
+      register: ciresponsetoken
+      failed_when: ciresponsetoken.status != 200
+    - debug:
+        msg: "TOKEN: {{ ciresponsetoken.json }}"
+
+
+    # SonarQube Jenkins integration
+    - name: Install required plugins in Jenkins for SonarQube
+      command: docker exec jenkins bash -c "jenkins-plugin-cli --plugins sonar sonar-quality-gates"
+
+    - name: Create SonarQube configuration in Jenkins
+      command: docker exec jenkins bash -c "curl -X POST http://admin:{{ jenkins_password.stdout }}@54.90.15.19:8080/configure         --data-urlencode 'sonar.host.url=http://localhost:9000'         --data-urlencode 'sonar.login={{ sonar_token.json.token }}'"
+
+    - name: Create Jenkins job using SonarQube for code analysis
+      community.general.jenkins_job:
+        config: "{{ lookup('file', 'pipeline-config.xml') }}"
+        name: "SonarQube-Analysis"
+        password: admin
+        url: http:54.90.15.1//:8080
+        user: admin
