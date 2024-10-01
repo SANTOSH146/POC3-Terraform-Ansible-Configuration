@@ -156,6 +156,11 @@
     - debug:
         msg: "TOKEN: {{ ciresponsetoken.json }}"
 
+    - name: Save token to a temporary file on remote
+      ansible.builtin.copy:
+        content: "{{ ciresponsetoken.json.token }}"
+        dest: "/tmp/sonarqube_token.txt"
+
 
 
     # SonarQube Jenkins integration
@@ -167,26 +172,26 @@
 
     # 
     
-    - name: Create Groovy script in Jenkins container as root
-      command: docker exec --user root jenkins bash -c 'echo "import hudson.plugins.sonar.SonarGlobalConfiguration; import hudson.plugins.sonar.model.TriggersConfig; import jenkins.model.Jenkins;\ndef sonarGlobalConfig = Jenkins.instance.getDescriptor(SonarGlobalConfiguration.class);\nsonarGlobalConfig.setServers([ new hudson.plugins.sonar.model.SonarInstallation( \"SonarQube\", // Name \"http://{{ public_ip }}:{{ sonarqube_port }}\", // SonarQube URL \"{{ '{{' }} ciresponsetoken.json.token {{ '}}' }}\", // SonarQube token \"\", \"\", \"\", // Empty Maven and Ant fields new TriggersConfig() // Default trigger configuration )]);\nsonarGlobalConfig.save();" > /var/jenkins_home/init.groovy.d/groovy_script.groovy'
+    # - name: Create Groovy script in Jenkins container as root
+    #   command: docker exec --user root jenkins bash -c 'echo "import hudson.plugins.sonar.SonarGlobalConfiguration; import hudson.plugins.sonar.model.TriggersConfig; import jenkins.model.Jenkins;\ndef sonarGlobalConfig = Jenkins.instance.getDescriptor(SonarGlobalConfiguration.class);\nsonarGlobalConfig.setServers([ new hudson.plugins.sonar.model.SonarInstallation( \"SonarQube\", // Name \"http://{{ public_ip }}:{{ sonarqube_port }}\", // SonarQube URL \"{{ '{{' }} ciresponsetoken.json.token {{ '}}' }}\", // SonarQube token \"\", \"\", \"\", // Empty Maven and Ant fields new TriggersConfig() // Default trigger configuration )]);\nsonarGlobalConfig.save();" > /var/jenkins_home/init.groovy.d/groovy_script.groovy'
 
 
 
-    - name: Restart Jenkins to apply SonarQube configuration
-      docker_container:
-        name: jenkins
-        state: stopped
+    # - name: Restart Jenkins to apply SonarQube configuration
+    #   docker_container:
+    #     name: jenkins
+    #     state: stopped
 
-    - name: Start Jenkins after Groovy configuration
-      docker_container:
-        name: jenkins
-        state: started
+    # - name: Start Jenkins after Groovy configuration
+    #   docker_container:
+    #     name: jenkins
+    #     state: started
 
-    - name: Wait for Jenkins to start after SonarQube configuration
-      wait_for:
-        port: 8080
-        delay: 10
-        timeout: 60
+    # - name: Wait for Jenkins to start after SonarQube configuration
+    #   wait_for:
+    #     port: 8080
+    #     delay: 10
+    #     timeout: 60
 
 
 
@@ -256,6 +261,15 @@
       community.general.jenkins_job:
         config: "{{ lookup('template', 'pipeline-config.xml') }}"
         name: test
-        token: 116126f81d0889483b5d79b1ee342115b1
+        token: 11ff5af8956f39f706d1eb8f7633530946
         url: http://{{ public_ip }}:8080
+        user: admin
+
+
+    - name: Create a jenkins job using basic authentication
+      community.general.jenkins_job:
+        config: "{{ lookup('file', 'pipeline-config.xml') }}"
+        name: pipeline
+        password: admin
+        url: http://{{public_ip}}:8080
         user: admin
