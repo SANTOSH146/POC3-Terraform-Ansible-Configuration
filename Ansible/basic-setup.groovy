@@ -15,8 +15,11 @@ instance.setSecurityRealm(hudsonRealm)
 def strategy = new FullControlOnceLoggedInAuthorizationStrategy()
 instance.setAuthorizationStrategy(strategy)
 
+// Disable CSRF Protection by setting Crumb Issuer to null
+instance.setCrumbIssuer(null)
+
 // Install plugins
-def plugins = ['git', 'sonar', 'pipeline','sonar quality gates']
+def plugins = ['git', 'sonar', 'pipeline','sonarqube','Strict Crumb Issuer']
 def pluginManager = instance.getPluginManager()
 def updateCenter = instance.getUpdateCenter()
 

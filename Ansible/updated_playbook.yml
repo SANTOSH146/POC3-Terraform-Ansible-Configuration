@@ -1,6 +1,19 @@
 - hosts: Jenkins
   become: yes
 
+  vars:
+    sonarqube_port: 9000
+    sonarqube_ci_login: "admin"
+    sonarqube_ci_password: "admin123"
+    sonarqube_admin_login: "admin"
+    sonarqube_admin_password: "admin"
+    sonarqube_token_name: "token"
+    quality_gate_name: "Sonar way"
+    sonarqube_ci_token_purpose: "Jenkins Integration"
+    jenkins_password: "admin"
+    ansible_python_interpreter: /root/myenv/bin/python3 
+    public_ip: "52.91.245.89"
+
   tasks:
     - name: Start Docker service
       service:
@@ -83,42 +96,59 @@
 
     - name: "Wait until SonarQube Container is reachable via TCP/IP."
       ansible.builtin.wait_for:
-        host: "54.90.15.19"
-        port: "{{ 9000 }}"
+        host: "{{ public_ip}}"
+        port: "{{ sonarqube_port }}"
         state: drained
         delay: 5
         connect_timeout: 15
         timeout: 30
+
+    - name: Start sonarqube container 
+      docker_container:
+        name: sonarqube
+        state: started
       
     - name: Check SonarQube to be healthy.
       ansible.builtin.uri:
-        url: "http://54.90.15.19:{{ 9000 }}/api/system/health"
-        user: "admin"
-        password: "admin"
+        url: "http://{{ public_ip}}:{{ sonarqube_port }}/api/system/health"
+        user: "{{ sonarqube_admin_login }}"
+        password: "{{ sonarqube_admin_password }}"
         method: GET
         force_basic_auth: yes
       register: response
       until:
         - "response.status == 200"
         - "'GREEN' == response.json.health"
-      retries: 20 # 20 * 5 seconds = 100 seconds.
-      delay: 5 # every 5 seconds
+      retries: 20
+      delay: 5
 
-    - name: Create CI User
+
+    # - name: Create CI User
+    #   ansible.builtin.uri:
+    #     url: "http://3.83.115.72:{{ sonarqube_port }}/api/users/create?local=true&login={{ sonarqube_ci_login }}&name={{ sonarqube_ci_login | urlencode }}&password={{ sonarqube_ci_password }}"
+    #     user: "{{ sonarqube_admin_login }}"
+    #     password: "{{ sonarqube_admin_password }}"
+    #     method: POST
+    #     force_basic_auth: yes
+    #   register: ciresponse
+    #   failed_when: ciresponse.status != 200
+
+    - name: Change Password of admin user.
       ansible.builtin.uri:
-        url: "http://54.90.15.19:{{ 9000 }}/api/users/create?local=true&login=admin&name={{ admin | urlencode }}&password=12345678"
-        user: "admin"
-        password: "admin"
+        url: "http://{{ public_ip }}:{{ sonarqube_port }}/api/users/change_password?login={{ sonarqube_admin_login }}&password={{ sonarqube_ci_password }}&previousPassword={{ sonarqube_admin_password }}"
+        user: "{{ sonarqube_admin_login }}"
+        password: "{{ sonarqube_admin_password }}"
         method: POST
         force_basic_auth: yes
-      register: ciresponse
-      failed_when: ciresponse.status != 200
+      register: responsecpw
+      failed_when: responsecpw.status != 204
 
-    - name: Create CI User Token
+
+    - name: Create CI User Token.
       ansible.builtin.uri:
-        url: "http://54.90.15.19:{{ 9000 }}/api/user_tokens/generate?login=admin&name={{ sonarqube_ci_token_purpose | urlencode }}"
-        user: "admin"
-        password: "12345678"
+        url: "http://{{ public_ip }}:{{ sonarqube_port }}/api/user_tokens/generate?login={{ sonarqube_ci_login }}&name={{ sonarqube_ci_token_purpose | urlencode }}"
+        user: "{{ sonarqube_ci_login }}"
+        password: "{{ sonarqube_ci_password }}"
         method: POST
         force_basic_auth: yes
       register: ciresponsetoken
@@ -127,17 +157,105 @@
         msg: "TOKEN: {{ ciresponsetoken.json }}"
 
 
+
     # SonarQube Jenkins integration
-    - name: Install required plugins in Jenkins for SonarQube
-      command: docker exec jenkins bash -c "jenkins-plugin-cli --plugins sonar sonar-quality-gates"
+    # - name: Install required plugins in Jenkins for SonarQube
+    #   command: docker exec jenkins bash -c "jenkins-plugin-cli --plugins sonar sonar-quality-gates"
 
-    - name: Create SonarQube configuration in Jenkins
-      command: docker exec jenkins bash -c "curl -X POST http://admin:{{ jenkins_password.stdout }}@54.90.15.19:8080/configure         --data-urlencode 'sonar.host.url=http://localhost:9000'         --data-urlencode 'sonar.login={{ sonar_token.json.token }}'"
+    # - name: Create SonarQube configuration in Jenkins
+    #   command: docker exec jenkins bash -c "curl -X POST http://admin:{{ jenkins_password.stdout }}@{{ public_ip }}:8080/sonarQubeServer/api/servers --data-urlencode 'name=SonarQube' --data-urlencode 'serverUrl=http://{{ public_ip }}:9000' --data-urlencode 'credentials={{ ciresponsetoken.json.token }}'"
 
-    - name: Create Jenkins job using SonarQube for code analysis
+    # 
+    
+    - name: Create Groovy script in Jenkins container as root
+      command: docker exec --user root jenkins bash -c 'echo "import hudson.plugins.sonar.SonarGlobalConfiguration; import hudson.plugins.sonar.model.TriggersConfig; import jenkins.model.Jenkins;\ndef sonarGlobalConfig = Jenkins.instance.getDescriptor(SonarGlobalConfiguration.class);\nsonarGlobalConfig.setServers([ new hudson.plugins.sonar.model.SonarInstallation( \"SonarQube\", // Name \"http://{{ public_ip }}:{{ sonarqube_port }}\", // SonarQube URL \"{{ '{{' }} ciresponsetoken.json.token {{ '}}' }}\", // SonarQube token \"\", \"\", \"\", // Empty Maven and Ant fields new TriggersConfig() // Default trigger configuration )]);\nsonarGlobalConfig.save();" > /var/jenkins_home/init.groovy.d/groovy_script.groovy'
+
+
+
+    - name: Restart Jenkins to apply SonarQube configuration
+      docker_container:
+        name: jenkins
+        state: stopped
+
+    - name: Start Jenkins after Groovy configuration
+      docker_container:
+        name: jenkins
+        state: started
+
+    - name: Wait for Jenkins to start after SonarQube configuration
+      wait_for:
+        port: 8080
+        delay: 10
+        timeout: 60
+
+
+
+
+    # - name: Install python3-venv package
+    #   apt:
+    #     name: python3-venv
+    #     state: present
+    #   become: true
+
+    # - name: Install pip in case it's not available
+    #   apt:
+    #     name: python3-pip
+    #     state: present
+    #   become: true
+
+    # - name: Create a virtual environment for Python
+    #   command: python3 -m venv /opt/venv
+    #   become: true
+    #   args:
+    #     creates: /opt/venv
+
+    # - name: Install python-jenkins library in the virtual environment
+    #   command: /opt/venv/bin/pip install python-jenkins
+    #   become: true
+
+    # - name: Get Jenkins Crumb
+    #   uri:
+    #     url: "http://{{ sonarqube_ci_login }}:{{ jenkins_password.stdout }}@3.83.115.72:8080/crumbIssuer/api/json"
+    #     method: GET
+    #     force_basic_auth: yes
+    #     return_content: yes
+    #   register: jenkins_crumb
+
+    # - name: Debug Jenkins Crumb
+    #   debug:
+    #     msg: "Jenkins Crumb: {{ jenkins_crumb.json.crumb }}"
+
+    # - name: Get Jenkins Crumb
+    #   uri:
+    #     url: "http://{{ sonarqube_ci_login }}:{{ jenkins_password.stdout }}@3.83.115.72:8080/crumbIssuer/api/json"
+    #     method: GET
+    #     force_basic_auth: yes
+    #     return_content: yes
+    #   register: jenkins_crumb
+      # no_log: true  # This will prevent sensitive information from being logged
+
+
+    # - name: Create Jenkins job using SonarQube for code analysis
+    #   community.general.jenkins_job:
+    #     config: "{{ lookup('file', 'pipeline-config.xml') }}"
+    #     name: "SonarQube-Analysis"
+    #     password: "{{ jenkins_password }}"
+    #     url: http://3.83.115.72:8080
+    #     user: "{{ sonarqube_ci_login }}"
+
+
+    # - name: Create a jenkins job using basic authentication
+    #   community.general.jenkins_job:
+    #     config: "{{ lookup('file', 'pipeline-config.xml') }}"
+    #     name: test
+    #     password: admin
+    #     url: http://{{ public_ip }}:8080
+    #     user: admin
+
+    - name: Create a jenkins job using the token
       community.general.jenkins_job:
-        config: "{{ lookup('file', 'pipeline-config.xml') }}"
-        name: "SonarQube-Analysis"
-        password: admin
-        url: http:54.90.15.1//:8080
+        config: "{{ lookup('template', 'pipeline-config.xml') }}"
+        name: test
+        token: 116126f81d0889483b5d79b1ee342115b1
+        url: http://{{ public_ip }}:8080
         user: admin

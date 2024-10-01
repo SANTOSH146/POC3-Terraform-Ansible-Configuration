@@ -50,7 +50,7 @@
       command: docker exec --user root jenkins mkdir -p /var/jenkins_home/init.groovy.d
 
     - name:copy the groovy file from wsl to vm
-      command: scp -i /home/santosh/terraform_kp.pem /home/santosh/Terraform-POC/Ansible/basic-setup.groovy ubuntu@54.90.15.19:/tmp/
+      command: scp -i /home/santosh/terraform_kp.pem /home/santosh/Terraform-POC/Ansible/basic-setup.groovy ubuntu@52.91.245.89:/tmp/
 
 
     - name: Copy basic setup Groovy script to Jenkins container
